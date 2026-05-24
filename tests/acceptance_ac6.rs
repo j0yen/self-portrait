@@ -13,10 +13,93 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::doc_markdown)]
 
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+use git2::{Repository, Signature};
+use tempfile::TempDir;
+
+fn init_repo(dir: &Path) -> Repository {
+    Repository::init(dir).unwrap()
+}
+
+fn commit_file(
+    repo: &Repository,
+    dir: &Path,
+    path: &str,
+    contents: &[u8],
+    msg: &str,
+    when_secs: i64,
+) {
+    fs::write(dir.join(path), contents).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(path)).unwrap();
+    index.write().unwrap();
+    let tree_oid = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_oid).unwrap();
+    let sig = Signature::new("Alice", "alice@example.com", &git2::Time::new(when_secs, 0)).unwrap();
+    let parent = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_commit().ok());
+    let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
+        .unwrap();
+}
+
 #[test]
 fn acceptance_ac6() {
-    // edit-agent: replace this stub with a real assertion. The
-    // panic keeps the test failing until you do, so the loop
-    // sees a real Stage 3 signal.
-    panic!("AC AC6 not yet implemented — see file header");
+    let tmp = TempDir::new().unwrap();
+    let repo = init_repo(tmp.path());
+
+    commit_file(
+        &repo,
+        tmp.path(),
+        "diary.md",
+        b"public entry\n",
+        "public entry",
+        1_700_000_000,
+    );
+    commit_file(
+        &repo,
+        tmp.path(),
+        "diary.md",
+        b"public entry\nsecret entry\n",
+        "second entry\n\nprivate: true\n",
+        1_700_000_100,
+    );
+    commit_file(
+        &repo,
+        tmp.path(),
+        "diary.md",
+        b"public entry\nsecret entry\nthird entry\n",
+        "third entry",
+        1_700_000_200,
+    );
+
+    let bin = env!("CARGO_BIN_EXE_self-portrait");
+    let out = Command::new(bin)
+        .args(["extract", "--file", "diary.md", "--repo"])
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let commits = parsed["commits"].as_array().unwrap();
+    assert_eq!(commits.len(), 3);
+
+    // Middle commit is private — diff is redacted, metadata intact.
+    let private_commit = &commits[1];
+    assert_eq!(private_commit["subject"], "second entry");
+    assert_eq!(private_commit["diff"], "[redacted]");
+    assert_eq!(private_commit["author_name"], "Alice");
+    assert!(private_commit["hash"].as_str().unwrap().len() == 40);
+    chrono::DateTime::parse_from_rfc3339(private_commit["committed_at"].as_str().unwrap()).unwrap();
+
+    // Surrounding public commits are NOT redacted.
+    assert_ne!(commits[0]["diff"].as_str().unwrap(), "[redacted]");
+    assert_ne!(commits[2]["diff"].as_str().unwrap(), "[redacted]");
+    assert!(commits[2]["diff"].as_str().unwrap().contains("+third entry"));
 }

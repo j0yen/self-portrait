@@ -13,10 +13,36 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::doc_markdown)]
 
+use std::process::Command;
+
+use tempfile::TempDir;
+
 #[test]
 fn acceptance_ac5() {
-    // edit-agent: replace this stub with a real assertion. The
-    // panic keeps the test failing until you do, so the loop
-    // sees a real Stage 3 signal.
-    panic!("AC AC5 not yet implemented — see file header");
+    let tmp = TempDir::new().unwrap();
+    // tmp.path() is a real, existing directory but not a git repo.
+
+    let bin = env!("CARGO_BIN_EXE_self-portrait");
+    let out = Command::new(bin)
+        .args(["extract", "--file", "README.md", "--repo"])
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let path_str = tmp.path().display().to_string();
+    assert!(
+        stderr.contains(&path_str),
+        "stderr should mention the path {path_str}: {stderr}"
+    );
+    assert!(
+        stderr.contains("not a git repository"),
+        "stderr should contain 'not a git repository': {stderr}"
+    );
 }
