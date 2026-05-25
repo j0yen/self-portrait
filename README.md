@@ -2,6 +2,24 @@
 
 > CLAUDE_SELF.md is the negotiated contract between user and agent — the *diffs* are the portrait.
 
+## Install
+
+### One-liner
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/j0yen/self-portrait/main/install.sh | bash
+```
+
+### Manual
+
+```sh
+git clone --depth 1 https://github.com/j0yen/self-portrait.git
+cd self-portrait
+./install.sh
+```
+
+Installs the `self-portrait` binary via `cargo install --path . --locked`. Requires `cargo` / `rustc 1.85+` and `git`. Built binary lands in `~/.cargo/bin/`.
+
 ## Why
 
 CLAUDE_SELF.md is the negotiated contract between user and agent — the *diffs* are the portrait. Phase 1a extracts every commit's hash/date/diff-hunk/message into structured JSON so downstream rendering passes (Claude reflections, Typst typesetting, A2 print) can consume a stable contract. Until the extractor exists, no later artifact can be built or audited.
