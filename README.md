@@ -1,69 +1,77 @@
 # self-portrait
 
-> CLAUDE_SELF.md is the negotiated contract between user and agent — the *diffs* are the portrait.
+Extract a single file's full git history as one structured JSON object — every commit that touched it, with hash, author, timestamp, message, and diff.
+
+## Why it exists
+
+`CLAUDE_SELF.md` is a negotiated contract between user and agent, and it changes over time. The interesting object isn't any one version of the file — it's the sequence of *diffs*, the record of how the self-description drifted. To study that drift you first need the history in a form a program can consume, not a `git log` you read by eye. `self-portrait` produces that: a stable JSON contract that a later rendering stage can turn into a reflection, a timeline, or a printed portrait. This repo is the extraction step.
 
 ## Install
 
-### One-liner
+Requires `cargo` / `rustc` 1.85+ (edition 2024) and `git`.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/j0yen/self-portrait/main/install.sh | bash
+cargo install --path . --locked
 ```
 
-### Manual
+The binary lands in `~/.cargo/bin/`. `./install.sh` runs the same `cargo install` for you.
+
+## Quickstart
+
+Walk one file's history in the current repository:
 
 ```sh
-git clone --depth 1 https://github.com/j0yen/self-portrait.git
-cd self-portrait
-./install.sh
+self-portrait extract --file CLAUDE_SELF.md
 ```
 
-Installs the `self-portrait` binary via `cargo install --path . --locked`. Requires `cargo` / `rustc 1.85+` and `git`. Built binary lands in `~/.cargo/bin/`.
-
-## Why
-
-CLAUDE_SELF.md is the negotiated contract between user and agent — the *diffs* are the portrait. Phase 1a extracts every commit's hash/date/diff-hunk/message into structured JSON so downstream rendering passes (Claude reflections, Typst typesetting, A2 print) can consume a stable contract. Until the extractor exists, no later artifact can be built or audited.
-
-## Build
+Point at another repository, and collapse runs of empty-diff commits into one synthetic entry:
 
 ```sh
-cargo build --release
+self-portrait extract --file docs/notes.md --repo ~/wintermute --collapse-trivial
 ```
 
-Produces `target/release/self-portrait`. Symlink into `~/.local/bin/` if you want it on `$PATH`.
+Output is a single JSON object on stdout:
 
-## Usage
-
-```sh
-self-portrait --help
+```json
+{
+  "file": "CLAUDE_SELF.md",
+  "repo": "/home/you/wintermute",
+  "generated_at": "2026-06-19T12:00:00Z",
+  "commits": [
+    {
+      "hash": "…",
+      "short_hash": "1a2b3c4",
+      "author_name": "…",
+      "author_email": "…",
+      "committed_at": "2026-06-01T09:30:00Z",
+      "subject": "…",
+      "body": "…",
+      "diff": "…"
+    }
+  ]
+}
 ```
 
-## Audience
+## Behavior
 
-the author running it against the wintermute CLAUDE_SELF.md (`/home/the author/wintermute/dotfiles/.claude/CLAUDE_SELF.md` or wherever the file lives in dotfiles). Audience for the JSON: the next pipeline stage (reflection generator) and the human eye spot-checking that diffs round-trip cleanly.
+- **Follows renames.** A commit that renamed the file appears, with the rename hunk preserved in `diff`. The walk follows the file across its old names.
+- **No editorializing.** Commits with trivial changes still appear with their diff verbatim; the consumer decides whether to collapse them — or pass `--collapse-trivial` to fold empty-diff runs into one synthetic entry.
+- **Deleted files.** If the file isn't at `HEAD` but existed historically, the walk still runs, exits 0, and adds a top-level `deleted_at` (RFC3339). A file that never existed under any name exits 3.
+- **Redaction.** A commit whose message body contains a trailer line `private: true` at column 0 keeps its hash, date, author, and subject, but its `diff` becomes `"[redacted]"`. The history stays auditable without leaking the private content.
 
-## Acceptance criteria
+## Exit codes
 
-This project was scaffolded from a PRD via the `autobuilder` pipeline. The MUST-level acceptance criteria are:
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 2 | `--repo` is not a git repository |
+| 3 | The file never existed under any name in HEAD's history |
+| 1 | Any other error |
 
-- **AC1**: `self-portrait extract --file <repo-relative-path> [--repo <dir>]` emits a single JSON object on stdout: `{file, repo, generated_at, commits: [...]}`. Each commit entry has: hash (full sha), short_hash (7 chars), author_name, author_emai...
-- **AC2**: Follows file renames via git's --follow semantics — a commit that renamed the file appears in the commits array, with `diff` containing the rename hunk.
-- **AC3**: Commits that touched the file with a trivial change (no semantic diff after the rename) still appear and their `diff` is included verbatim; the consumer decides whether to collapse them. The extractor does not editorialize.
-- **AC4**: When the file does not exist in the current HEAD but did historically (e.g. it was deleted), the extractor still walks the history — exits 0 with all commits in `commits` and a top-level `"deleted_at": "<RFC3339>"` field. If the file nev...
-- **AC5**: When `--repo <dir>` points at a non-git path: exit code 2 with stderr containing the path and `not a git repository`.
-- **AC6**: Commit messages with `private: true` in a Markdown-style trailer line (e.g. line `private: true` at column 0) cause the diff hunk for that commit to be redacted to the string `"[redacted]"`. The hash/date/author/subject still appear so t...
+## Status
 
-Each AC has a matching integration test under `tests/acceptance_ac<n>.rs`.
-
-## Provenance
-
-Built via the [`autobuilder`](https://github.com/j0yen/autobuilder) pipeline (PRD intake -> intent-card -> scaffold -> iterate-and-prove). Originally consolidated as a subdir of the [`wintermute`](https://github.com/j0yen/wintermute) monorepo; this standalone repo is a fresh-init snapshot for easier consumption and distribution.
+What ships today is the extractor — one `extract` subcommand emitting the JSON contract above. The downstream rendering stages (reflection, typesetting, print) that would consume this contract are not part of this repo. The JSON is the stable boundary they build on.
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option.
+Licensed under either of Apache License 2.0 ([LICENSE-APACHE](LICENSE-APACHE)) or MIT ([LICENSE-MIT](LICENSE-MIT)), at your option.
